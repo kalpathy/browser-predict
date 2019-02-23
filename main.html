@@ -1,0 +1,30 @@
+<html>
+<head>
+</head>
+
+<body>
+<h2> yo </h2>
+<label id='top-label'></label>
+
+<div>
+<img src="./examples/cardiomegaly.jpeg" height=224 width=224></img>
+</div>
+
+<script src="libs/tf.min.js"></script>
+<script src="./preprocess.js"></script>
+<script src="https://d3js.org/d3.v5.min.js"></script>
+
+
+<script>
+
+let bub = testTf();
+d3.select("#top-label")
+  .text(bub.toString());
+
+
+</script>
+
+
+</body>
+
+</html>
