@@ -6,9 +6,13 @@
 <h2> yo </h2>
 <label id='top-label'></label>
 
-<div>
+<!-- <div>
 <img src="./examples/cardiomegaly.jpeg" height=224 width=224></img>
-</div>
+</div> -->
+
+<div id='userimg'></div>
+
+<input type="file" id="inputFile" name="inputFileName">
 
 <script src="libs/tf.min.js"></script>
 <script src="./preprocess.js"></script>
@@ -20,6 +24,43 @@
 let bub = testTf();
 d3.select("#top-label")
   .text(bub.toString());
+
+let imageProcessWidth = 224;
+let imageProcessHeight = 224;
+
+fileElement = document.getElementById('inputFile');
+fileElement.addEventListener('change', evt => {
+
+    let files = evt.target.files; // Display thumbnails & issue call to predict each image.
+    if (evt.target.files.length < 1) {
+        return;
+    }
+
+    let fileInfo = files[0];
+    let filename = fileInfo.name;
+
+    if (!fileInfo.type.match('image.*')) {
+        console.log('error: ' + filename + ' not an image file');
+        return;
+    }
+
+    console.log("info: reading " + filename);
+
+    let reader = new FileReader();
+
+    reader.onload = e => {
+      let img = document.createElement('img');
+      img.src = e.target.result;
+      img.width = imageProcessWidth;
+      img.height = imageProcessHeight;
+
+      let userImgDiv = document.getElementById('userimg');
+      userImgDiv.appendChild(img);
+      //img.onload = () => predict(img, false, filename);
+    };
+
+    reader.readAsDataURL(fileInfo);
+});
 
 
 </script>
