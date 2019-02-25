@@ -1,4 +1,9 @@
 
+
+// this comes from http://bl.ocks.org/jfreels/6734025
+// it was modified to accept multiple arrays, but better would be to
+// zip input arrays together and then displayed with 
+// the code as originally written.
 function buildTable(labels, logits, norms) {
 		var table = d3.select('body').append('table')
 		var thead = table.append('thead')
