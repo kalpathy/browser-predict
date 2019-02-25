@@ -17,6 +17,7 @@
 
   <script src="libs/tf.min.js"></script>
   <script src="./preprocess.js"></script>
+  <script src="./drawTable.js"></script>
   <script src="https://d3js.org/d3.v5.min.js"></script>
 
 
@@ -126,73 +127,14 @@
         return mobilenet.execute(batched, ["Sigmoid"])
       });
 
-      logits = await output.data()
-
+      logits = await output.data();
 
       //console.log("Computed logits and grad " + Math.floor(performance.now() - startTime) + "ms");
-      console.log("logits=" + logits)
+      console.log("logits=" + logits);
 
+      buildTable(LABELS, logits, null);
     }
 
-    async function computeGrads(thispred, batched) {
-
-      try {
-        status('Computing gradients...');
-        $("#file-container #files").attr("disabled", true)
-
-        const startTime = performance.now();
-        await computeGrads_real(thispred, batched);
-
-        const totalTime = performance.now() - startTime;
-        status(`Done in ${Math.floor(totalTime)}ms`);
-
-      } catch (err) {
-        $(".loading").hide()
-        status("Error! " + err.message);
-        console.log(err)
-      }
-
-      $("#file-container #files").attr("disabled", false)
-    }
-
-    async function computeGrads_real(thispred, batched) {
-
-      thispred.find(".gradviz .loading")[0].style.display = "block";
-
-      await sleep(100)
-
-      grad = tf.tidy(() => {
-
-        const temp = mobilenet.executor.checkTensorForDisposal
-        mobilenet.executor.checkTensorForDisposal = function() {}
-
-        const grad = chestgrad(batched);
-
-        mobilenet.executor.checkTensorForDisposal = temp
-
-        return grad
-
-      });
-
-      //////// display grad image
-      canvas = thispred.find(".gradimage")[0]
-      layer = grad.mean(0).abs().max(0)
-      await tf.toPixels(layer.div(layer.max()), canvas);
-      canvas.style.width = "100%";
-      canvas.style.height = "";
-      canvas.style.imageRendering = "pixelated";
-
-      ctx = canvas.getContext("2d");
-      d = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      makeColor(d.data);
-      makeTransparent(d.data)
-      ctx.putImageData(d, 0, 0);
-
-      thispred.find(".gradviz .loading")[0].style.display = "none";
-      thispred.find(".gradimagebox")[0].style.display = "block";
-      ////////////////////
-
-    }
   </script>
 
 
