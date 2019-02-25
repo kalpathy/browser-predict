@@ -1,69 +1,334 @@
 <html>
+
 <head>
 </head>
 
 <body>
-<h2> yo </h2>
-<label id='top-label'></label>
+  <h2> yo </h2>
+  <label id='top-label'></label>
 
-<!-- <div>
+  <!-- <div>
 <img src="./examples/cardiomegaly.jpeg" height=224 width=224></img>
 </div> -->
 
-<div id='userimg'></div>
+  <div id='userimg'></div>
 
-<input type="file" id="inputFile" name="inputFileName">
+  <input type="file" id="inputFile" name="inputFileName">
 
-<script src="libs/tf.min.js"></script>
-<script src="./preprocess.js"></script>
-<script src="https://d3js.org/d3.v5.min.js"></script>
+  <script src="libs/tf.min.js"></script>
+  <script src="./preprocess.js"></script>
+  <script src="https://d3js.org/d3.v5.min.js"></script>
 
 
-<script>
+  <script>
 
-let bub = testTf();
-d3.select("#top-label")
-  .text(bub.toString());
 
-let imageProcessWidth = 224;
-let imageProcessHeight = 224;
+    const LABELS = ['Atelectasis', 'Cardiomegaly', 'Effusion', 'Infiltration', 'Mass', 'Nodule', 'Pneumonia',
+      'Pneumothorax', 'Consolidation', 'Edema', 'Emphysema', 'Fibrosis', 'Pleural_Thickening', 'Hernia'
+    ];
 
-fileElement = document.getElementById('inputFile');
-fileElement.addEventListener('change', evt => {
+    const OP_POINT = [0.45879191, 0.20330566, 0.34361544, 0.30163303, 0.50299263,
+      0.36888129, 0.29530331, 0.6088959, 0.46361208, 0.17098247,
+      0.31575406, 0.51793754, 0.49182123, 0.59332716
+    ];
 
-    let files = evt.target.files; // Display thumbnails & issue call to predict each image.
-    if (evt.target.files.length < 1) {
+    const IMAGE_SIZE = 224;
+    const RECSCORE_THRESH = 0.5;
+    const OODSCORE_THRESH = 1000;
+
+    let bub = testTf();
+    d3.select("#top-label")
+      .text(bub.toString());
+
+    fileElement = document.getElementById('inputFile');
+    fileElement.addEventListener('change', evt => {
+
+      let files = evt.target.files; // Display thumbnails & issue call to predict each image.
+      if (evt.target.files.length < 1) {
         return;
-    }
+      }
 
-    let fileInfo = files[0];
-    let filename = fileInfo.name;
+      let fileInfo = files[0];
+      let filename = fileInfo.name;
 
-    if (!fileInfo.type.match('image.*')) {
+      if (!fileInfo.type.match('image.*')) {
         console.log('error: ' + filename + ' not an image file');
         return;
+      }
+
+      console.log("info: reading " + filename);
+
+      let reader = new FileReader();
+
+      reader.onload = e => {
+        let img = document.createElement('img');
+        img.src = e.target.result;
+        // img.width = IMAGE_SIZE;
+        // img.height = IMAGE_SIZE;
+
+        let userImgDiv = document.getElementById('userimg');
+        userImgDiv.appendChild(img);
+        img.onload = () => predict(img, false, filename);
+      };
+
+      reader.readAsDataURL(fileInfo);
+    });
+
+    function status(msg) {
+      console.log(msg);
     }
 
-    console.log("info: reading " + filename);
 
-    let reader = new FileReader();
+    let batched
+    let grads
+    let currentpred
+    async function predict(imgElement, isInitialRun, name) {
 
-    reader.onload = e => {
-      let img = document.createElement('img');
-      img.src = e.target.result;
-      img.width = imageProcessWidth;
-      img.height = imageProcessHeight;
+      try {
+        const startTime = performance.now();
+        await predict_real(imgElement, isInitialRun, name);
 
-      let userImgDiv = document.getElementById('userimg');
-      userImgDiv.appendChild(img);
-      //img.onload = () => predict(img, false, filename);
-    };
+        const totalTime = performance.now() - startTime;
+        status(`Done in ${Math.floor(totalTime)}ms`);
 
-    reader.readAsDataURL(fileInfo);
-});
+      } catch (err) {
+        console.log("error: exception during predict_real");
+      }
+
+    }
+    async function predict_real(imgElement, isInitialRun, name) {
+      status('Predicting...');
+
+      cropImg = preprocess(imgElement);
+
+      //////// display input image
+      // imgs = currentpred.find(".inputimage")
+      // for (i = 0; i < imgs.length; i++) {
+      //   canvas = imgs[i]
+      //
+      //   await tf.toPixels(cropImg, canvas);
+      //   canvas.style.width = "100%";
+      //   canvas.style.height = "";
+      //   canvas.style.imageRendering = "pixelated";
+      // }
+      ////////////////////
+
+      batched = cropImg.reshape([1, 1, IMAGE_SIZE, IMAGE_SIZE]).tile([1, 3, 1, 1])
+
+      console.log("Prepared input image " + Math.floor(performance.now() - startTime) + "ms");
 
 
-</script>
+      status('Computing Reconstruction...');
+
+      img_small = document.createElement('img');
+      img_small.src = imgElement.src
+      img_small.width = 64
+      img_small.height = 64
+
+      let {
+        recInput,
+        recErr,
+        rec
+      } = tf.tidy(() => {
+
+        const img = tf.fromPixels(img_small).toFloat();
+
+        const normalized = img.div(tf.scalar(255));
+
+        const batched = normalized.mean(2).reshape([1, 1, 64, 64])
+
+        const batched2 = batched.mul(2).sub(1)
+
+        const rec = mobileaenet.predict(batched)
+
+        const recErr = batched.sub(rec).abs()
+
+        return {
+          recInput: batched,
+          recErr: recErr,
+          rec: rec
+        };
+      });
+
+      recScore = recErr.mean().dataSync()
+      console.log(recScore);
+
+      console.log("Computed Reconstruction " + Math.floor(performance.now() - startTime) + "ms");
+
+      if (isInitialRun && (recScore > 0.27 || recScore < 0.01)) {
+        error = new Error("Something wrong with this browser. Try refreshing the page. (" + recScore + ")");
+        error.name = "BadBrowser"
+        throw error
+      }
+
+
+      canvas_a = currentpred.find(".inputimage_rec")[0]
+      layer = recInput.reshape([64, 64])
+      await tf.toPixels(layer.div(2).add(0.5), canvas_a);
+
+      canvas_b = currentpred.find(".recimage")[0]
+      layer = rec.reshape([64, 64])
+      await tf.toPixels(layer.div(2).add(0.5), canvas_b);
+
+      console.log("Wrote images " + Math.floor(performance.now() - startTime) + "ms");
+
+      // compute ssim
+      canvas = canvas_a
+      a = {
+        width: canvas.width,
+        height: canvas.height,
+        data: canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data,
+        channels: 4,
+        canvas: canvas
+      }
+      canvas = canvas_b
+      b = {
+        width: canvas.width,
+        height: canvas.height,
+        data: canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data,
+        channels: 4,
+        canvas: canvas
+      }
+
+      // https://github.com/darosh/image-ssim-js
+      ssim = ImageSSIM.compare(a, b, 8, 0.01, 0.03, 8)
+      console.log("ssim " + JSON.stringify(ssim));
+
+      console.log("Computed SSIM " + Math.floor(performance.now() - startTime) + "ms");
+
+      //////// display ood image
+
+      canvas = currentpred.find(".oodimage")[0]
+      layer = recErr.reshape([64, 64])
+      await tf.toPixels(layer.div(2), canvas);
+      canvas.style.width = "100%";
+      canvas.style.height = "";
+      canvas.style.imageRendering = "pixelated";
+
+      ctx = canvas.getContext("2d");
+      d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      makeColor(d.data);
+      makeTransparent(d.data)
+      ctx.putImageData(d, 0, 0);
+
+      scoreBox = document.createElement("center")
+      score = "recScore:" + parseFloat(recScore).toFixed(2) + ", ssim:" + ssim.ssim.toFixed(2)
+      scoreBox.innerText = score
+      currentpred.find(".oodimagebox")[0].append(scoreBox)
+
+      currentpred.find(".oodviz .loading")[0].style.display = "none";
+      currentpred.find(".oodimagebox")[0].style.display = "block";
+      ////////////////////
+
+      console.log("Plotted Reconstruction " + Math.floor(performance.now() - startTime) + "ms");
+
+
+
+      status('Predicting disease...');
+      await sleep(100)
+
+      can_predict = ssim.ssim > 0.30
+
+      if (!can_predict) {
+
+
+        showProbError(currentpred.find(".predbox")[0], score)
+        return
+
+
+      } else {
+        output = tf.tidy(() => {
+
+          return mobilenet.execute(batched, ["Sigmoid"])
+        });
+
+        logits = await output.data()
+
+        console.log("Computed logits and grad " + Math.floor(performance.now() - startTime) + "ms");
+        console.log("logits=" + logits)
+
+        const classes = await distOverClasses(logits)
+
+        showProbResults(currentpred.find(".predbox")[0], classes, recScore)
+        currentpred.find(".predviz .loading")[0].style.display = "none";
+
+
+        currentpred.find(".gradviz .loading").hide()
+        if (can_predict) {
+          currentpred.find(".gradviz .computegrads").show()
+
+          currentpred.find(".gradviz .computegrads").click(function() {
+            currentpred.find(".gradviz .computegrads").hide()
+            computeGrads(currentpred, batched);
+          });
+        }
+
+
+        console.log("results plotted " + Math.floor(performance.now() - startTime) + "ms");
+      }
+
+    }
+
+    async function computeGrads(thispred, batched) {
+
+      try {
+        status('Computing gradients...');
+        $("#file-container #files").attr("disabled", true)
+
+        const startTime = performance.now();
+        await computeGrads_real(thispred, batched);
+
+        const totalTime = performance.now() - startTime;
+        status(`Done in ${Math.floor(totalTime)}ms`);
+
+      } catch (err) {
+        $(".loading").hide()
+        status("Error! " + err.message);
+        console.log(err)
+      }
+
+      $("#file-container #files").attr("disabled", false)
+    }
+
+    async function computeGrads_real(thispred, batched) {
+
+      thispred.find(".gradviz .loading")[0].style.display = "block";
+
+      await sleep(100)
+
+      grad = tf.tidy(() => {
+
+        const temp = mobilenet.executor.checkTensorForDisposal
+        mobilenet.executor.checkTensorForDisposal = function() {}
+
+        const grad = chestgrad(batched);
+
+        mobilenet.executor.checkTensorForDisposal = temp
+
+        return grad
+
+      });
+
+      //////// display grad image
+      canvas = thispred.find(".gradimage")[0]
+      layer = grad.mean(0).abs().max(0)
+      await tf.toPixels(layer.div(layer.max()), canvas);
+      canvas.style.width = "100%";
+      canvas.style.height = "";
+      canvas.style.imageRendering = "pixelated";
+
+      ctx = canvas.getContext("2d");
+      d = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      makeColor(d.data);
+      makeTransparent(d.data)
+      ctx.putImageData(d, 0, 0);
+
+      thispred.find(".gradviz .loading")[0].style.display = "none";
+      thispred.find(".gradimagebox")[0].style.display = "block";
+      ////////////////////
+
+    }
+  </script>
 
 
 </body>
